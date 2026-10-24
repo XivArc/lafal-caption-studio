@@ -1,0 +1,51 @@
+name: Deploy Lafal Studio to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check project and caption logic
+        run: |
+          npm run check
+          npm test
+          test -f dist/index.html
+          test -f dist/transcribe-worker.js
+          test -f dist/vendor/ort/ort-wasm-simd.wasm
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload static website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+          include-hidden-files: true
+
+      - name: Publish website
+        id: deployment
+        uses: actions/deploy-pages@v4

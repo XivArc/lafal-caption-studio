@@ -1,0 +1,255 @@
+LAFAL STUDIO — TUTORIAL HOSTING GITHUB PAGES
+Paket full project, versi 23 Oktober 2026
+
+ALUR YANG DIGUNAKAN
+
+Ekstrak ZIP > buat repository > aktifkan Pages > upload file > commit >
+jalankan workflow > buka website. Semua langkah utama bisa melalui browser,
+seperti alur upload dan deploy Prysm Motion Studio.
+
+GitHub Pages menerbitkan website. Whisper dan render caption berjalan di browser
+perangkat yang membuka website, sehingga tab harus tetap terbuka selama proses.
+Workflow Actions di paket ini memeriksa kode dan menerbitkan folder dist.
+
+
+1. EKSTRAK PAKET
+
+- Klik kanan file Lafal_Studio_Full_Project_GitHub_Pages.zip.
+- Pilih Extract All / Ekstrak Semua.
+- Masuk ke folder Lafal-Studio hasil ekstrak.
+- Folder ini berisi dist, scripts, tests, docs, package.json, README.md,
+  deploy-pages.yml, panduan ini, serta folder .github.
+
+Yang diunggah adalah isi folder Lafal-Studio. Repository nanti harus memiliki
+dist langsung di halaman utama. Hindari menaruh seluruh proyek dalam subfolder
+Lafal-Studio tambahan di dalam repository.
+
+
+2. BUAT REPOSITORY BARU
+
+- Buka https://github.com/ dan login ke akun GitHub milikmu.
+- Klik tombol + di kanan atas, lalu New repository.
+- Isi Repository name: lafal-caption-studio
+- Pilih Public untuk penggunaan GitHub Pages pada GitHub Free.
+- Aktifkan Add a README file agar branch utama langsung tersedia.
+- Klik Create repository.
+
+Gunakan repository baru agar proyek ini mudah dipisahkan dari Prysm Motion Studio.
+Nama repository boleh berbeda; kode dalam paket sudah mendukung subfolder
+repository GitHub Pages tanpa mengedit base URL.
+
+
+3. AKTIFKAN GITHUB PAGES
+
+- Di repository baru, klik tab Settings.
+- Pada sidebar, buka Pages.
+- Temukan Build and deployment.
+- Ubah Source menjadi GitHub Actions.
+
+Untuk panduan ini, Source yang dipakai adalah GitHub Actions. Folder yang
+diterbitkan ditentukan workflow, yaitu dist.
+
+
+4. UPLOAD FILE PROYEK
+
+- Kembali ke tab Code di repository.
+- Pilih Add file > Upload files.
+- Di Windows File Explorer, buka folder Lafal-Studio yang sudah diekstrak.
+- Drag & drop folder dist, scripts, tests, docs, lalu file package.json,
+  README.md, deploy-pages.yml, MULAI_DI_SINI.txt, dan panduan ini.
+- Tunggu semua file selesai diunggah.
+- Isi pesan commit, misalnya: Add Lafal Studio project.
+- Pilih Commit directly to the main branch jika pilihan itu muncul.
+- Klik Commit changes.
+
+Pastikan di tab Code terlihat folder dist di tingkat teratas, dan di dalamnya
+ada index.html, app.js, styles.css, transcribe-worker.js, assets, serta vendor.
+File ONNX berukuran sekitar 9.6 MiB dan sudah berada di bawah batas upload browser
+GitHub sebesar 25 MiB per file.
+
+Upload file hasil ekstrak. Jika ZIP utuh diunggah sebagai satu file, GitHub Pages
+tidak akan mengekstraknya untuk menjalankan aplikasi.
+
+
+5. PASTIKAN WORKFLOW ADA DI LOKASI YANG BENAR
+
+Workflow yang dijalankan GitHub harus berada di:
+
+  .github/workflows/deploy-pages.yml
+
+Jika folder .github sudah ikut terunggah dan file tersebut terlihat di tab Code,
+langsung lanjut ke langkah 6.
+
+Jika folder .github belum terunggah, buat file lewat browser:
+
+- Di halaman utama repository, pilih Add file > Create new file.
+- Pada kolom nama file, ketik persis:
+  .github/workflows/deploy-pages.yml
+- Di laptop, buka deploy-pages.yml dari folder utama Lafal-Studio dengan Notepad.
+- Salin SELURUH isinya, lalu tempel ke editor GitHub.
+- Pertahankan indentasi/spasi seperti file asli.
+- Klik Commit changes, beri pesan Add Pages deployment workflow, lalu commit
+  ke branch main.
+
+File deploy-pages.yml di folder utama merupakan salinan untuk memudahkan langkah
+ini. GitHub menjalankan salinan di .github/workflows/, sehingga lokasi tersebut
+harus benar. Token deployment bawaan GitHub digunakan otomatis oleh workflow.
+Tidak perlu membuat Personal Access Token atau menambahkan API key Whisper.
+
+
+6. TUNGGU PROSES DEPLOY
+
+- Klik tab Actions.
+- Buka workflow Deploy Lafal Studio to GitHub Pages.
+- Buka run terbaru.
+- Tunggu langkah pemeriksaan kode, Configure GitHub Pages, Upload static website,
+  dan Publish website selesai dengan tanda hijau.
+- Pada ringkasan run, buka link deployment GitHub Pages yang ditampilkan.
+- Alamat website juga bisa ditemukan kembali melalui Settings > Pages.
+
+Contoh bentuk URL, ganti USERNAME dengan username GitHub milikmu:
+
+  https://USERNAME.github.io/lafal-caption-studio/
+
+Itu pola alamat, bukan link website yang sudah dibuat di akunmu. Jika nama repo
+berbeda, bagian terakhir mengikuti nama repository tersebut.
+
+Jika workflow belum berjalan, masuk ke Actions > Deploy Lafal Studio to GitHub
+Pages > Run workflow > pilih main > Run workflow.
+
+Jika workflow pertama gagal karena Source Pages belum diatur, selesaikan langkah
+3 lalu buka run gagal dan pilih Re-run all jobs.
+
+
+7. UJI WEBSITE
+
+- Buka alamat GitHub Pages dari hasil deploy.
+- Klik Coba contoh untuk melihat editor dan menguji preset serta ekspor.
+- Kembali ke upload lalu pilih video yang memiliki percakapan jelas.
+- Format: MP4, MOV, WebM. Maksimal 200 MB dan durasi 10 menit.
+- Pada pemakaian pertama, tunggu unduhan Whisper sekitar 75 MB dan mesin FFmpeg
+  sekitar 31 MB saat diperlukan.
+- Tunggu status proses selesai; aplikasi langsung membuka editor.
+- Koreksi teks dan waktu yang perlu disesuaikan.
+- Coba preset Highlight per kata untuk animasi warna pada kata yang diucapkan.
+- Klik Export, pilih Video dengan caption atau File subtitle.
+- Setelah selesai, klik Download.
+
+Model ringan Whisper Tiny bisa salah mengenali kata, terutama suara bising,
+ucapan cepat, musik keras, atau beberapa orang berbicara bersamaan. Periksa
+hasilnya sebelum membagikan video. Kecepatan proses mengikuti perangkatmu.
+
+
+8. UPDATE WEBSITE SETELAH ADA REVISI
+
+- Buka repository > Code > Add file > Upload files.
+- Upload file/folder revisi ke lokasi yang sama.
+- Untuk revisi aplikasi, biasanya yang diunggah adalah folder dist beserta
+  seluruh isinya. Pertahankan struktur folder aslinya.
+- Klik Commit changes.
+- Buka Actions dan tunggu deployment terbaru selesai dengan tanda hijau.
+- Buka lagi website. Jika tampilan lama masih muncul, tekan Ctrl+F5.
+
+Setiap commit ke main atau master akan memicu workflow yang disertakan.
+
+
+9. MENJALANKAN LOKAL DI WINDOWS, OPSIONAL
+
+Langkah ini untuk mencoba file di laptop sebelum upload. Hosting melalui GitHub
+bisa dilakukan tanpa menjalankan bagian ini.
+
+- Gunakan Node.js versi 20 atau lebih baru.
+- Buka Terminal/CMD di dalam folder Lafal-Studio.
+- Jalankan:
+
+  npm run dev
+
+- Buka http://localhost:5173/ di Chrome atau Edge.
+- Untuk menutup server lokal, kembali ke terminal lalu tekan Ctrl+C.
+
+Semua dependensi browser yang didistribusikan sudah berada di folder vendor.
+Server lokal memakai modul bawaan Node, sehingga npm install tidak diperlukan.
+Model AI dan FFmpeg core tetap diunduh ketika pertama dibutuhkan.
+
+Jika port 5173 sedang dipakai:
+
+  npm run dev -- --port 5174
+
+Untuk meniru alamat yang memakai subfolder repository:
+
+  npm run dev -- --base /lafal-caption-studio/
+
+Buka URL yang tercetak di terminal. Gunakan localhost atau HTTPS ketika memakai
+fitur browser seperti proses media. Membuka index.html melalui file:// dapat
+memblokir worker, module JavaScript, dan akses model.
+
+
+10. SOLUSI MASALAH YANG PALING UMUM
+
+Website 404:
+- Pastikan run Actions terbaru sudah hijau dan Source Pages adalah GitHub Actions.
+- Periksa bahwa dist/index.html ada tepat di lokasi itu pada repository.
+- Pastikan proyek tidak terunggah menjadi Lafal-Studio/dist/index.html.
+- Gunakan link deployment yang ditampilkan GitHub setelah selesai.
+
+Workflow tidak muncul:
+- Pastikan nama/path tepat .github/workflows/deploy-pages.yml.
+- File deploy-pages.yml yang hanya ada di folder utama tidak memicu Actions.
+- Pastikan commit masuk ke main atau master; workflow paket mendengarkan kedua
+  nama branch itu.
+
+Workflow merah pada pemeriksaan kode:
+- Buka job yang merah, lalu baca langkah Check project and caption logic.
+- Pastikan package.json, scripts, tests, dan dist semuanya sudah terunggah.
+- Upload ulang file paket lengkap pada posisi yang benar.
+
+Workflow merah pada Configure GitHub Pages atau Publish website:
+- Buka Settings > Pages, lalu pastikan Source = GitHub Actions.
+- Jika akun/organisasi membatasi Actions, izinkan workflow dan action resmi
+  GitHub yang digunakan, sesuai pengaturan yang tersedia pada repository.
+- Pertahankan bagian permissions dan environment dari workflow asli.
+- Setelah memperbaiki pengaturan, jalankan Re-run all jobs.
+
+Tampilan polos atau contoh tidak terbuka:
+- Pastikan dist/styles.css, dist/app.js, dan seluruh dist/assets ikut diunggah.
+- Upload folder dist secara utuh, lalu commit ulang dan tunggu deploy selesai.
+
+AI tidak memulai / unduhan model gagal:
+- Pastikan dist/vendor/ dan dist/transcribe-worker.js ikut diunggah.
+- Gunakan Chrome atau Edge desktop yang mendukung WebAssembly.
+- Pastikan koneksi bisa mengakses huggingface.co dan cdn.jsdelivr.net.
+- Izinkan penyimpanan browser; browser/cache privat bisa membatasi penyimpanan.
+- Coba ulang atau gunakan impor SRT/VTT untuk mengedit subtitle yang sudah ada.
+
+Ekspor lama atau gagal:
+- Tetap buka tab; kecepatan render mengikuti laptop/ponsel yang digunakan.
+- Coba resolusi 720p atau video yang lebih pendek.
+- Model dan konversi MP4 dapat memerlukan memori tambahan.
+
+
+11. APA YANG DISIMPAN DAN DITERBITKAN
+
+Website dan kode repository Public dapat diakses orang lain. Video milikmu yang
+dipilih melalui area upload diproses lokal; aplikasi tidak mengirimkannya ke
+repository GitHub. Proyek autosave disimpan di profil browser/perangkat tersebut.
+Membuka website di perangkat lain belum memindahkan proyek secara otomatis.
+Menghapus data situs dapat menghapus proyek yang tersimpan lokal.
+
+Paket full project mencakup kode, demo, library browser, lisensi, tes, server
+preview opsional, dan workflow. Bobot model Whisper serta FFmpeg core diambil
+otomatis dari sumber masing-masing saat digunakan.
+
+
+REFERENSI RESMI GITHUB
+
+Pengaturan Source GitHub Pages:
+https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
+
+Custom workflow GitHub Pages:
+https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+
+Upload file ke repository:
+https://docs.github.com/en/repositories/working-with-files/managing-files/adding-a-file-to-a-repository
+
+Action deploy dan token bawaan:
+https://github.com/actions/deploy-pages

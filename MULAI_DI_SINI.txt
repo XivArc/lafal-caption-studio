@@ -1,0 +1,22 @@
+LAFAL STUDIO — FULL PROJECT UNTUK GITHUB PAGES
+
+1. Ekstrak ZIP ini terlebih dahulu.
+2. Masuk ke folder Lafal-Studio.
+3. Baca PANDUAN_HOSTING_GITHUB_PAGES.txt untuk langkah lengkap tanpa CMD.
+4. Upload isi folder Lafal-Studio ke repository baru milikmu.
+5. Aktifkan Settings > Pages > Source: GitHub Actions.
+6. Pastikan .github/workflows/deploy-pages.yml ada di repository.
+   Jika folder .github tidak terunggah, buat file itu lewat Add file > Create new file.
+   Salin isinya dari deploy-pages.yml yang ada di folder utama paket ini.
+7. Tunggu workflow Deploy Lafal Studio to GitHub Pages selesai dengan tanda hijau.
+
+File website utama: dist/index.html
+Panduan lengkap: PANDUAN_HOSTING_GITHUB_PAGES.txt
+Workflow siap salin: deploy-pages.yml
+Catatan pengembangan: README.md
+
+Transkripsi dan render dikerjakan browser perangkatmu. Biarkan tab tetap terbuka
+saat memproses video. GitHub Actions pada paket ini menerbitkan website.
+
+Paket ini tidak memerlukan API key untuk Whisper atau token GitHub manual.
+Model AI dan FFmpeg core diunduh otomatis ketika dibutuhkan.
