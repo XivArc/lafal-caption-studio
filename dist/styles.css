@@ -315,7 +315,8 @@ body.is-editor .stepper { margin: 24px auto; }
 .stage-play { position: absolute; inset: 0; margin: auto; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: white; background: #15344555; border: 1px solid #dbf1f85c; backdrop-filter: blur(8px); opacity: 0; transition: opacity .2s; }
 .stage-play svg { width: 18px; height: 18px; fill: currentColor; stroke: none; margin-left: 2px; }
 .video-stage:hover .stage-play, .video-stage.paused .stage-play { opacity: 1; }
-.video-stage.playing .stage-play { display: none; }
+.video-stage.playing .stage-play { display: grid; }
+.stage-play[data-mode="pause"] svg { fill: none; stroke: currentColor; stroke-width: 2; margin-left: 0; }
 #safeAreaGuide { position: absolute; border: 1px dashed #75dfe6aa; pointer-events: none; }
 #safeAreaGuide span { position: absolute; bottom: 2px; right: 4px; font-size: 7px; letter-spacing: 1px; color: #8ae5eb; }
 .video-controls { display: flex; align-items: center; gap: 12px; padding: 10px 12px; font-size: 10px; }
@@ -707,3 +708,34 @@ dialog::backdrop { background: #01080fb5; backdrop-filter: blur(8px); }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Editing scopes and interactive playhead */
+.timeline-header { align-items: center; gap: 12px; flex-wrap: wrap; }
+.timeline-header select { margin-left: auto; min-height: 32px; padding: 4px 10px; font-size: 10px; }
+.caption-timeline { height: 56px; touch-action: none; cursor: ew-resize; user-select: none; }
+.caption-timeline:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.timeline-segment { top: 20px; height: 28px; pointer-events: none; }
+.timeline-playhead { width: 2px; transform: translateX(-1px); box-shadow: 0 0 8px var(--accent-soft); }
+.timeline-playhead::before { width: 10px; height: 9px; left: -4px; border-radius: 2px 2px 4px 4px; }
+.timeline-help { margin: 8px 0 0; color: var(--muted); font-size: 9px; }
+.edit-scope-row { display: flex; align-items: center; gap: 12px; margin: 12px 16px 4px; font-size: 11px; }
+.edit-scope-row select { flex: 1; min-height: 36px; padding: 6px 10px; }
+.scope-hint { margin: 8px 16px 12px; font-size: 10px; line-height: 1.6; color: var(--muted); }
+.sentence-picker { margin: 8px 16px; font-size: 10px; }
+.sentence-picker select { width: 100%; margin-top: 6px; font-size: 10px; padding: 8px; }
+.style-target { font-size: 11px; margin-top: 20px; color: var(--muted); }
+.word-context { font-size: 12px; line-height: 1.7; margin-bottom: 16px; }
+.word-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.word-chip { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; background: var(--surface-2); }
+.word-chip.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.word-editor > label { display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
+.word-editor input { min-width: 0; width: 100%; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.word-note, .bulk-transcript p { color: var(--muted); font-size: 10px; line-height: 1.7; }
+.bulk-transcript { margin-bottom: 16px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.bulk-transcript summary { cursor: pointer; color: var(--accent); font-size: 11px; }
+.bulk-transcript textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; font: inherit; font-size: 12px; line-height: 1.7; margin: 12px 0; }
+.process-diagnostics { max-width: 540px; margin: 16px auto; text-align: left; font-size: 11px; color: var(--muted); }
+.process-diagnostics summary { cursor: pointer; color: var(--accent); }
+.process-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; margin-top: 8px; background: var(--surface-2); border-radius: 8px; }
+.process-view.error .process-stage .stage-status::after { animation: none; border-color: var(--warning); }
+@media (hover: none) { .video-stage.playing .stage-play { opacity: .65; } }

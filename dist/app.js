@@ -1,5 +1,7 @@
 import {DEFAULT_STYLE,PRESETS,PRESET_LABELS,uid,clamp,clock,parseTime,cleanText,splitLines,distributeWords,wordsToCaptions,tidyCaptions,captionMetrics,exportSubtitles,parseSubtitles,outputSize,activeCaption,drawFrame} from './core.js';
 import * as storage from './storage.js';
+import {captionWords,replaceCaptionText,editWord,retimeCaption,timelineTime,applyScopedStyle} from './editor.js';
+import {aiFailure} from './diagnostics.js';
 import {extractAudio,normalizeVideo,convertToMP4,stopMedia} from './media.js';
 
 const $=id=>document.getElementById(id);
@@ -9,7 +11,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const clone=v=>structuredClone(v);
 const countLabel=(count,noun)=>`${count} ${noun}${count===1?'':'s'}`;
 const video=$('previewVideo'),canvas=$('previewCanvas'),ctx=canvas.getContext('2d',{alpha:false});
-const state={project:null,file:null,url:null,selected:null,view:'upload',uploadPreset:'highlight',undo:[],redo:[],worker:null,job:0,exportType:'video',exporting:false,cancelRender:null,editing:null,lastActive:null,saveTimer:null,toastTimer:null,exportURL:null,storageError:false};
+const state={scope:'all',wordIndex:0,scrubbing:false,processStage:'upload',cancelTranscription:null,freshModel:false,project:null,file:null,url:null,selected:null,view:'upload',uploadPreset:'highlight',undo:[],redo:[],worker:null,job:0,exportType:'video',exporting:false,cancelRender:null,editing:null,lastActive:null,saveTimer:null,toastTimer:null,exportURL:null,storageError:false};
 const viewIds={upload:'uploadView',process:'processView',editor:'editorView',projects:'projectsView'};
 const langLabels={auto:'Auto-detect',indonesian:'Indonesian',english:'English',japanese:'Japanese',chinese:'Chinese',korean:'Korean',arabic:'Arabic',spanish:'Spanish',french:'French',german:'German'};
 
@@ -51,7 +53,7 @@ function updateLandingPreset(){
   demo.querySelector('span').style.background=state.uploadPreset==='highlight'?'var(--accent)':'transparent';
   demo.querySelector('span').style.color=state.uploadPreset==='highlight'?'#06141e':'#fff';
 }
-function snapshot(){return {captions:clone(state.project.captions),style:clone(state.project.style),selected:state.selected};}
+function snapshot(){return {captions:clone(state.project.captions),style:clone(state.project.style),selected:state.selected,wordIndex:state.wordIndex};}
 function pushUndo(){if(!state.project)return;state.undo.push(snapshot());if(state.undo.length>60)state.undo.shift();state.redo=[];updateHistory();}
 function commit(change,{list=true,controls=true}={}){if(!state.project||state.exporting)return;pushUndo();change();if(list)renderCaptionList();renderTimeline();if(controls)syncStyleControls();markDirty();}
 function updateHistory(){$('undoButton').disabled=!state.undo.length;$('redoButton').disabled=!state.redo.length;}
@@ -59,7 +61,7 @@ function undo(redo=false){
   if(state.exporting||!state.project)return;
   const from=redo?state.redo:state.undo,to=redo?state.undo:state.redo;
   if(!from.length)return;to.push(snapshot());const s=from.pop();
-  state.project.captions=s.captions;state.project.style=s.style;state.selected=s.selected;
+  state.project.captions=s.captions;state.project.style=s.style;state.selected=s.selected;state.wordIndex=s.wordIndex??0;
   renderCaptionList();renderTimeline();syncStyleControls();updateHistory();markDirty();
 }
 function markDirty(){
@@ -84,6 +86,7 @@ async function saveNow(){
 async function updateProjectCount(){try{$('projectCount').textContent=(await storage.listProjects()).length;}catch{}}
 function language(){return $('uploadLanguage').value;}
 function processProgress(stage,percent,label,detail){
+  state.processStage=stage;
   const stages=['upload','analyze','compose'],active=stages.indexOf(stage);
   document.querySelectorAll('.process-stage').forEach(el=>{const n=stages.indexOf(el.dataset.stage);el.classList.toggle('active',n===active);el.classList.toggle('complete',n<active);});
   const progress=clamp(Math.round(percent),0,100);$('processProgress').value=progress;$('progressPercent').textContent=progress+'%';$('progressLabel').textContent=label;
@@ -110,13 +113,13 @@ async function createThumbnail(){
   }catch{return assetURL('./assets/demo-poster.jpg');}
 }
 function resetProcessing(filename){
-  $('processView').classList.remove('error');$('processingFilename').textContent=filename;
+  $('processView').classList.remove('error');$('processDiagnostics').hidden=true;$('processingFilename').textContent=filename;
   $('processView').querySelector('h1').innerHTML='Your story,<br>taking shape.';
   $('processErrorActions')?.remove();$('cancelProcess').hidden=false;
   processProgress('upload',0,'Preparing video…','Your video is processed on this device. Keep this tab open until it finishes.');setView('process');
 }
 async function handleFile(file){
-  if(!file)return;
+  if(!file)return;state.freshModel=false;
   if(state.view==='process'||state.exporting)return toast('Finish or cancel the current process first.');
   const ext=file.name.split('.').pop()?.toLowerCase();
   if(!['mp4','mov','webm'].includes(ext))return toast('Choose an MP4, MOV, or WebM video.',true);
@@ -153,42 +156,60 @@ async function generateCaptions(job){
   const result=await transcribe(audio,project.language,job);
   if(job!==state.job)return;
   processProgress('compose',96,'Refining line breaks and pauses…','Up to two lines, sized to fit your video and positioned within the safe area.');
-  project.captions=wordsToCaptions(result.words,project);project.status='ready';
+  project.captions=wordsToCaptions(result.words,project);project.status='ready';project.estimatedWordTiming=!!result.estimatedWordTiming;
+  if(project.estimatedWordTiming)toast('Captions ready. Word timing is estimated from caption timing and can be edited in Word mode.');
   if(!project.captions.length)toast('No speech detected. Add captions manually or import an SRT/VTT file.');
   state.selected=project.captions[0]?.id??null;
   await saveNow();
   processProgress('compose',100,'Captions ready. Opening the editor…');
   showEditor();
 }
-function transcribe(audio,language,job){
-  if(!state.worker)state.worker=new Worker(new URL('./transcribe-worker.js',import.meta.url),{type:'module'});
-  return new Promise((resolve,reject)=>{
-    state.worker.onmessage=({data})=>{
-      if(job!==state.job)return;
-      if(data.type==='download')processProgress('analyze',30,`Downloading model · ${(data.loaded/1048576).toFixed(1)} MB`,'The first download may take a few minutes. Your video stays on your device.');
-      if(data.type==='status')$('progressLabel').textContent=data.message;
-      if(data.type==='progress')processProgress('analyze',32+data.progress*62,`Recognising speech · ${Math.round(data.progress*100)}%`,'Whisper is working. For longer videos, processing may take longer than the video itself.');
-      if(data.type==='done')resolve(data);
-      if(data.type==='error')reject(new Error(`Whisper could not run. ${data.message.includes('fetch')?'The model download failed. Check your internet connection and try again.':data.message.includes('memory')?'Not enough memory. Try a shorter video and close other tabs.':'Try again or import an SRT/VTT file into the editor.'}`));
-    };
-    state.worker.onerror=()=>reject(new Error('The AI engine could not load. Check your internet connection and try again. You can still import subtitles into the editor.'));
-    state.worker.postMessage({type:'transcribe',audio,language},[audio.buffer]);
-  });
+async function transcribe(audio,language,job){
+  let lastError;
+  for(let attempt=0;attempt<2;attempt++){
+    if(job!==state.job)throw new DOMException('Processing cancelled','AbortError');
+    try{return await new Promise((resolve,reject)=>{
+      state.worker?.terminate();
+      const worker=new Worker(new URL('./transcribe-worker.js',import.meta.url),{type:'module'});state.worker=worker;
+      const finish=(error,data)=>{worker.terminate();if(state.worker===worker)state.worker=null;state.cancelTranscription=null;error?reject(error):resolve(data);};
+      state.cancelTranscription=()=>finish(new DOMException('Processing cancelled','AbortError'));
+      worker.onmessage=({data})=>{
+        if(job!==state.job)return finish(new DOMException('Processing cancelled','AbortError'));
+        if(data.type==='download')processProgress('analyze',30,`Downloading model · ${(data.loaded/1048576).toFixed(1)} MB`,'The first download may take a few minutes. Your video stays on your device.');
+        if(data.type==='status'){$('progressLabel').textContent=data.message;if(data.message.startsWith('Recognising'))$('processDetail').textContent='Whisper is analysing speech on this device. This can take longer than the video duration.';}
+        if(data.type==='progress')processProgress('analyze',32+data.progress*62,`Recognising speech · ${Math.round(data.progress*100)}%`,'Whisper is working. Longer videos may take more time than their duration.');
+        if(data.type==='done')finish(null,data);
+        if(data.type==='error'){const error=new Error(data.message);error.phase=data.phase;finish(error);}
+      };
+      worker.onerror=e=>{e.preventDefault();finish(new Error(e.message||'The speech worker failed to load.'));};
+      worker.onmessageerror=()=>finish(new Error('Could not transfer audio to the speech worker.'));
+      const copy=audio.slice();worker.postMessage({type:'transcribe',audio:copy,language,compatibility:attempt>0,freshModel:state.freshModel||attempt>0},[copy.buffer]);
+    });}catch(error){
+      if(error.name==='AbortError'||job!==state.job)throw error;
+      lastError=error;
+      if(attempt||aiFailure(error.message).code==='AI_MEMORY')break;
+      processProgress('analyze',30,'Restarting the speech engine…','Retrying once with a fresh model and a compatible WebAssembly engine.');
+    }
+  }
+  throw lastError;
 }
 function processError(error){
-  $('processView').classList.add('error');$('processView').querySelector('h1').innerHTML='Processing<br>was interrupted.';
-  $('progressLabel').textContent='Processing stopped';$('processDetail').textContent=error.message||'Could not process this video. Select the file again.';
-  $('cancelProcess').hidden=true;
+  state.worker?.terminate();state.worker=null;
+  const problem=aiFailure(error.message,error.phase||state.processStage);
+  $('processView').classList.add('error');$('processView').querySelector('h1').innerHTML='Speech recognition<br>needs attention.';
+  $('progressLabel').textContent=problem.title;$('processDetail').textContent=problem.help;
+  $('processDiagnostics').hidden=false;$('processErrorDetails').textContent=`${problem.code} · ${problem.phase}\n${problem.raw}`;
+  $('cancelProcess').hidden=true;$('processErrorActions')?.remove();
   const row=document.createElement('div');row.id='processErrorActions';
-  if(state.project&&state.file){const retry=document.createElement('button');retry.className='button primary';retry.textContent='Try again';retry.onclick=retryTranscription;row.append(retry);const editor=document.createElement('button');editor.className='button secondary';editor.textContent='Open editor';editor.onclick=showEditor;row.append(editor);}
+  if(state.project&&state.file){const retry=document.createElement('button');retry.className='button primary';retry.textContent='Try again';retry.onclick=()=>{state.freshModel=true;retryTranscription();};row.append(retry);const editor=document.createElement('button');editor.className='button secondary';editor.textContent='Open editor';editor.onclick=showEditor;row.append(editor);}
   else{const back=document.createElement('button');back.className='button primary';back.textContent='Choose another video';back.onclick=()=>setView('upload');row.append(back);}
   $('processView').append(row);
 }
 async function retryTranscription(){if(!state.file)return;const job=++state.job;resetProcessing(state.project.filename);try{await generateCaptions(job);}catch(e){if(job===state.job)processError(e);}}
-async function cancelProcessing(){++state.job;state.worker?.terminate();state.worker=null;stopMedia();if(state.project&&state.file){await saveNow();showEditor();}else setView('upload');}
+async function cancelProcessing(){++state.job;state.cancelTranscription?.();state.worker?.terminate();state.worker=null;stopMedia();if(state.project&&state.file){await saveNow();showEditor();}else setView('upload');}
 function showEditor(){
   if(!state.project)return setView('upload');
-  const p=state.project;
+  const p=state.project;state.wordIndex=0;state.lastActive=null;state.scope='all';syncScope();
   const size=outputSize(p.width,p.height,'original');canvas.width=size.width;canvas.height=size.height;
   $('projectTitle').textContent=p.title;
   $('projectMeta').textContent=`${p.width} × ${p.height} · ${clock(p.duration)} · ${langLabels[p.language]||'Auto-detect'}`;
@@ -215,21 +236,30 @@ async function demoProject(){
     toast('This demo includes prepared captions. Upload your own video to try Whisper.');
   }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
-function effectiveStyle(){return {...state.project?.style,...state.project?.captions.find(c=>c.id===state.selected)?.style};}
+function selectedCaption(){return state.project?.captions.find(c=>c.id===state.selected);}
+function effectiveStyle(){const c=selectedCaption();return {...state.project?.style,...c?.style,...(state.scope==='word'?captionWords(c||{text:'',start:0,end:1})[state.wordIndex]?.style:{})};}
+function syncScope(){
+  $('editScope').value=state.scope;$('panelEditScope').value=state.scope;
+  $('styleTarget').textContent=state.scope==='all'?'All captions':state.scope==='sentence'?'Selected sentence':'Selected word';
+  $('position').disabled=state.scope==='word';
+  $('scopeHint').textContent=state.scope==='word'?'Select a word below to edit its text, timing, or style. Position applies to the whole sentence.':state.scope==='sentence'?'Only the selected sentence will change.':'Style changes apply to all captions. Edit individual captions or the full transcript.';
+}
+function setScope(scope){
+  if(state.exporting)return;state.scope=scope;state.wordIndex=0;state.editing=null;
+  if(!selectedCaption())state.selected=state.project?.captions[0]?.id??null;
+  $('captionSearch').value='';syncScope();renderCaptionList();renderTimeline();syncStyleControls();
+}
 function syncStyleControls(){
-  if(!state.project)return;const s=effectiveStyle();
+  if(!state.project)return;const s=effectiveStyle();syncScope();
   const values={fontFamily:s.font,fontSize:s.size,textColor:s.color,highlightColor:s.highlight,outline:s.outline,backgroundOpacity:s.background,position:s.position,animation:s.animation};
   for(const [id,v] of Object.entries(values))$(id).value=v;
   $('shadow').checked=s.shadow;$('fontSizeValue').textContent=`${Number(s.size).toFixed(1)}% of video height`;$('outlineValue').textContent=s.outline+'%';$('backgroundValue').textContent=s.background+'%';
   document.querySelectorAll('.quick-preset,.style-preset').forEach(b=>{const selected=b.dataset.preset===s.preset;b.classList.toggle('selected',selected);b.setAttribute('aria-pressed',selected);});
-  $('styleScopeHint').textContent=$('applyAll').checked?'Changes appear instantly in all captions.':'Changes apply only to the selected caption.';
+  $('styleScopeHint').textContent=state.scope==='all'?'Changes appear instantly in all captions.':state.scope==='sentence'?'Changes apply only to this sentence.':'Changes apply only to this word. Sentence position stays the same.';
 }
 function changeStyle(patch){
   if(!state.project)return;
-  commit(()=>{
-    if($('applyAll').checked){state.project.style={...state.project.style,...patch};for(const c of state.project.captions){if(c.style){c.style={...c.style,...patch};}}}
-    else{const c=state.project.captions.find(c=>c.id===state.selected);if(c)c.style={...effectiveStyle(),...patch};}
-  },{list:false});
+  commit(()=>applyScopedStyle(state.project,state.scope,state.selected,state.wordIndex,patch),{list:false});
 }
 function applyPreset(key){changeStyle(clone(PRESETS[key]));}
 function setPanel(panel){const text=panel==='text';$('textPanel').hidden=!text;$('stylePanel').hidden=text;$('textTab').classList.toggle('active',text);$('styleTab').classList.toggle('active',!text);$('textTab').setAttribute('aria-selected',text);$('styleTab').setAttribute('aria-selected',!text);}
@@ -240,23 +270,54 @@ function metricsMarkup(c){
 function renderCaptionList(){
   if(!state.project)return;
   const p=state.project,q=$('captionSearch').value.toLocaleLowerCase();
-  const filtered=p.captions.filter(c=>c.text.toLocaleLowerCase().includes(q));$('captionCount').textContent=p.captions.length;
+  const filtered=p.captions.filter(c=>(state.scope==='all'||c.id===state.selected)&&c.text.toLocaleLowerCase().includes(q));$('captionCount').textContent=p.captions.length;
   if(!filtered.length){$('captionList').innerHTML=q?'<div class="empty-captions">No matching captions.<br>Try a different search.</div>':`<div class="empty-captions">No captions yet.<br>Add text, import SRT/VTT,<br>or try transcribing again.<br><button id="retryFromEditor" class="button secondary" style="margin-top:20px">${icon('spark')} Generate captions</button></div>`;$('retryFromEditor')?.addEventListener('click',retryTranscription);return;}
-  $('captionList').innerHTML=filtered.map(c=>`<article class="caption-item ${c.id===state.selected?'selected':''}" data-id="${c.id}" tabindex="0" aria-label="Caption ${p.captions.indexOf(c)+1}"><div class="caption-item-top"><span class="caption-index">${String(p.captions.indexOf(c)+1).padStart(2,'0')}</span><input class="caption-time-input" data-time="start" aria-label="Caption start time ${p.captions.indexOf(c)+1}" value="${clock(c.start,true)}"><span class="time-separator">→</span><input class="caption-time-input" data-time="end" aria-label="Caption end time ${p.captions.indexOf(c)+1}" value="${clock(c.end,true)}"><button class="caption-delete icon-button" data-delete="${c.id}" aria-label="Delete caption ${p.captions.indexOf(c)+1}">${icon('trash')}</button></div><textarea rows="2" spellcheck="false" aria-label="Caption text ${p.captions.indexOf(c)+1}" maxlength="700">${esc(c.text)}</textarea><div class="caption-metrics">${metricsMarkup(c)}</div></article>`).join('');
-  $('captionList').querySelectorAll('textarea').forEach(ta=>{ta.style.height='auto';ta.style.height=Math.max(40,ta.scrollHeight)+'px';});
+  if(state.scope==='word'){renderWordEditor();return;}
+  const bulk=state.scope==='all'?`<details class="bulk-transcript"><summary>Edit full transcript</summary><p>Keep one paragraph per caption. Timing is preserved.</p><textarea id="transcriptEditor" rows="8" aria-label="Full transcript">${esc(p.captions.map(c=>c.text).join('\n\n'))}</textarea><button class="button secondary" id="applyTranscript">Apply transcript</button></details>`:'';
+  $('captionList').innerHTML=bulk+filtered.map(c=>`<article class="caption-item ${c.id===state.selected?'selected':''}" data-id="${c.id}" tabindex="0" aria-label="Caption ${p.captions.indexOf(c)+1}"><div class="caption-item-top"><span class="caption-index">${String(p.captions.indexOf(c)+1).padStart(2,'0')}</span><input class="caption-time-input" data-time="start" aria-label="Caption start time ${p.captions.indexOf(c)+1}" value="${clock(c.start,true)}"><span class="time-separator">→</span><input class="caption-time-input" data-time="end" aria-label="Caption end time ${p.captions.indexOf(c)+1}" value="${clock(c.end,true)}"><button class="caption-delete icon-button" data-delete="${c.id}" aria-label="Delete caption ${p.captions.indexOf(c)+1}">${icon('trash')}</button></div><textarea rows="2" spellcheck="false" aria-label="Caption text ${p.captions.indexOf(c)+1}" maxlength="700">${esc(c.text)}</textarea><div class="caption-metrics">${metricsMarkup(c)}</div></article>`).join('');
+  $('applyTranscript')?.addEventListener('click',applyTranscript);
+  renderSentencePicker();
+  $('captionList').querySelectorAll('.caption-item textarea').forEach(ta=>{ta.style.height='auto';ta.style.height=Math.max(40,ta.scrollHeight)+'px';});
+}
+function renderSentencePicker(){
+  const c=selectedCaption();$('sentencePicker').hidden=state.scope==='all';
+  $('sentenceSelect').innerHTML=state.project.captions.map((cue,i)=>`<option value="${esc(cue.id)}">${i+1}. ${esc(cue.text.slice(0,70))}</option>`).join('');
+  if(c)$('sentenceSelect').value=c.id;
+}
+function renderWordEditor(){
+  const c=selectedCaption();if(!c)return;const words=captionWords(c);state.wordIndex=clamp(state.wordIndex,0,Math.max(0,words.length-1));const w=words[state.wordIndex];
+  renderSentencePicker();
+  $('captionList').innerHTML=`<div class="word-editor"><p class="word-context">${esc(c.text)}</p><div class="word-chips">${words.map((word,i)=>`<button class="word-chip ${i===state.wordIndex?'selected':''}" data-word="${i}" aria-pressed="${i===state.wordIndex}">${esc(word.text)}</button>`).join('')}</div>${w?`<label>Word<input id="wordText" value="${esc(w.text)}" aria-label="Selected word text"></label><div class="two-controls"><label>Start<input id="wordStart" value="${clock(w.start,true)}" aria-label="Selected word start"></label><label>End<input id="wordEnd" value="${clock(w.end,true)}" aria-label="Selected word end"></label></div><button id="applyWord" class="button secondary">Apply word</button><p class="word-note">Text previews instantly. Apply word to save timing changes. Only this word changes. Other words keep their timing and style.</p>`:'<p>No words in this caption.</p>'}</div>`;
+}
+function applyTranscript(){
+  const parts=$('transcriptEditor').value.trim().split(/\n\s*\n/).map(cleanText);
+  if(parts.length!==state.project.captions.length||parts.some(t=>!t))return toast('Keep one non-empty paragraph per caption. Use Sentence mode to add or remove captions.',true);
+  commit(()=>state.project.captions.forEach((c,i)=>replaceCaptionText(c,parts[i])));toast('Transcript updated. Caption timing is preserved.');
 }
 function renderTimeline(){
-  if(!state.project)return;
-  const p=state.project;
-  $('captionTimeline').innerHTML=p.captions.map(c=>`<button class="timeline-segment ${c.id===state.selected?'active':''}" data-id="${c.id}" style="left:${c.start/p.duration*100}%;width:${(c.end-c.start)/p.duration*100}%" title="${esc(c.text)}" aria-label="Jump to ${esc(c.text)}">${esc(c.text)}</button>`).join('')+'<span class="timeline-playhead" id="timelinePlayhead"></span>';
+  if(!state.project)return;const p=state.project,c=selectedCaption();
+  const segments=state.scope==='word'&&c?captionWords(c).map((w,i)=>({...w,id:c.id,wordIndex:i})):p.captions;
+  $('timelineSegments').innerHTML=segments.map(cue=>`<span class="timeline-segment ${cue.id===state.selected&&(state.scope!=='word'||cue.wordIndex===state.wordIndex)?'active':''}" data-id="${cue.id}" ${cue.wordIndex==null?'':`data-word="${cue.wordIndex}"`} style="left:${cue.start/p.duration*100}%;width:${(cue.end-cue.start)/p.duration*100}%" title="${esc(cue.text)}">${esc(cue.text)}</span>`).join('');
+  updatePlayer();
+}
+function seekTo(time,select=true){
+  if(!state.project||state.exporting)return;
+  video.currentTime=clamp(time,0,state.project.duration);state.lastActive=null;
+  const c=activeCaption(state.project.captions,video.currentTime);
+  if(select&&c){const changed=c.id!==state.selected;state.selected=c.id;
+    if(state.scope==='word'){const i=captionWords(c).findIndex(w=>video.currentTime>=w.start&&video.currentTime<w.end);if(i>=0)state.wordIndex=i;}
+    if(state.scope!=='all')renderCaptionList();else if(changed)document.querySelectorAll('.caption-item').forEach(row=>row.classList.toggle('selected',row.dataset.id===c.id));
+    if(changed||state.scope==='word')renderTimeline();syncStyleControls();
+  }
+  updatePlayer();paintPreview();
 }
 function selectCaption(id,seek=true){
   if(state.exporting)return;const c=state.project?.captions.find(c=>c.id===id);if(!c)return;
-  state.selected=id;
+  const changed=state.selected!==id;state.selected=id;if(changed)state.wordIndex=0;
+  if(state.scope!=='all'&&changed)renderCaptionList();
   $('captionList').querySelectorAll('.caption-item').forEach(row=>row.classList.toggle('selected',row.dataset.id===id));
-  $('captionTimeline').querySelectorAll('.timeline-segment').forEach(row=>row.classList.toggle('active',row.dataset.id===id));
-  if(seek)video.currentTime=c.start+.001;
-  syncStyleControls();
+  $('timelineSegments').querySelectorAll('.timeline-segment').forEach(row=>row.classList.toggle('active',row.dataset.id===id&&(state.scope!=='word'||Number(row.dataset.word)===state.wordIndex)));
+  if(seek)seekTo(c.start+.001,false);syncStyleControls();
 }
 function addCaption(){
   if(!state.project)return;const p=state.project,time=video.currentTime;
@@ -285,11 +346,16 @@ async function importSubtitle(file){
 function updatePlayer(){
   if(!state.project||state.view!=='editor')return;
   const time=video.currentTime||0;$('currentTime').textContent=clock(time);$('videoSeek').value=time;
-  $('playButton').innerHTML=icon(video.paused?'play':'pause');$('playButton').setAttribute('aria-label',video.paused?'Play':'Pause');
+  const playing=!video.paused&&!video.ended;
+  for(const [id,overlay] of [['playButton',false],['stagePlay',true]]){
+    const b=$(id),mode=playing?'pause':'play';
+    if(b.dataset.mode!==mode){b.dataset.mode=mode;b.innerHTML=icon(mode);b.setAttribute('aria-label',playing?(overlay?'Pause video':'Pause'):(overlay?'Play video':'Play'));}
+  }
+  const timeline=$('captionTimeline');timeline.setAttribute('aria-valuemax',state.project.duration);timeline.setAttribute('aria-valuenow',time.toFixed(3));timeline.setAttribute('aria-valuetext',`${clock(time,true)} of ${clock(state.project.duration)}`);
   $('videoStage').classList.toggle('paused',video.paused);$('videoStage').classList.toggle('playing',!video.paused);
   const head=$('timelinePlayhead');if(head)head.style.left=`${time/state.project.duration*100}%`;
   const current=activeCaption(state.project.captions,time);
-  if(!video.paused&&current?.id!==state.lastActive){state.lastActive=current?.id;
+  if(!video.paused&&!state.scrubbing&&state.scope==='all'&&current?.id!==state.lastActive){state.lastActive=current?.id;
     if(current&&!$('captionList').contains(document.activeElement)){
       selectCaption(current.id,false);
       const row=$('captionList').querySelector(`[data-id="${current.id}"]`);
@@ -297,11 +363,13 @@ function updatePlayer(){
     }
   }
 }
-function frameLoop(){
-  if(state.project&&state.view==='editor'&&video.readyState>=2){drawFrame(ctx,canvas.width,canvas.height,video,state.project.captions,video.currentTime,state.project.style);updatePlayer();}
-  requestAnimationFrame(frameLoop);
+function paintPreview(){if(state.project&&state.view==='editor'&&video.readyState>=2)drawFrame(ctx,canvas.width,canvas.height,video,state.project.captions,video.currentTime,state.project.style);}
+function frameLoop(){if(state.project&&state.view==='editor'){paintPreview();updatePlayer();}requestAnimationFrame(frameLoop);}
+async function togglePlay(){
+  if(state.view!=='editor'||state.exporting)return;
+  try{if(video.paused){if(video.ended||video.currentTime>=state.project.duration-.02)seekTo(0,false);const promise=video.play();updatePlayer();await promise;}else{video.pause();updatePlayer();}}
+  catch(error){if(error.name!=='AbortError')toast('Could not play this video. Try again or use an MP4 H.264 file.',true);}
 }
-async function togglePlay(){if(state.view!=='editor'||state.exporting)return;try{if(video.paused){if(video.currentTime>=video.duration-.05)video.currentTime=0;await video.play();}else video.pause();}catch{toast('Could not play this video. Try again or use an MP4 H.264 file.',true);}}
 function updateSafeArea(){const c=canvas.getBoundingClientRect(),stage=$('videoStage').getBoundingClientRect(),guide=$('safeAreaGuide');guide.style.left=(c.left-stage.left+c.width*.05)+'px';guide.style.top=(c.top-stage.top+c.height*.1)+'px';guide.style.width=c.width*.9+'px';guide.style.height=c.height*.8+'px';}
 async function openProject(id){
   if(state.view==='process'||state.exporting)return;
@@ -441,30 +509,54 @@ $('captionList').addEventListener('click',e=>{
 $('captionList').addEventListener('keydown',e=>{if(e.target.classList.contains('caption-item')&&e.key==='Enter')selectCaption(e.target.dataset.id);});
 $('captionList').addEventListener('focusin',e=>{if(e.target.tagName==='TEXTAREA')state.editing=null;});
 $('captionList').addEventListener('input',e=>{
-  if(e.target.tagName!=='TEXTAREA'||!state.project)return;
+  if(e.target.tagName!=='TEXTAREA'||e.target.id==='transcriptEditor'||!state.project)return;
   const row=e.target.closest('.caption-item'),c=state.project.captions.find(c=>c.id===row.dataset.id);if(!c)return;
   if(state.editing!==c.id){pushUndo();state.editing=c.id;}
-  c.text=e.target.value.replace(/\n/g,' ');c.words=distributeWords(c.text,c.start,c.end);c.timingEdited=true;
+  replaceCaptionText(c,e.target.value);
   e.target.style.height='auto';e.target.style.height=Math.max(40,e.target.scrollHeight)+'px';row.querySelector('.caption-metrics').innerHTML=metricsMarkup(c);renderTimeline();markDirty();
 });
 $('captionList').addEventListener('focusout',e=>{if(e.target.tagName==='TEXTAREA')state.editing=null;});
 $('captionList').addEventListener('change',e=>{
   if(!e.target.matches('[data-time]'))return;const row=e.target.closest('.caption-item'),c=state.project.captions.find(c=>c.id===row.dataset.id),key=e.target.dataset.time,n=parseTime(e.target.value);
   if(!Number.isFinite(n)||n<0||n>state.project.duration||(key==='start'?n>=c.end:n<=c.start)){e.target.value=clock(c[key],true);return toast('Enter a valid time, such as 00:03.500. The end must be after the start and within the video duration.',true);}
-  commit(()=>{c[key]=n;c.words=distributeWords(c.text,c.start,c.end);c.timingEdited=true;state.project.captions.sort((a,b)=>a.start-b.start);});
+  commit(()=>{retimeCaption(c,key==='start'?n:c.start,key==='end'?n:c.end);state.project.captions.sort((a,b)=>a.start-b.start);});
 });
-$('captionTimeline').addEventListener('click',e=>{const button=e.target.closest('[data-id]');if(button)selectCaption(button.dataset.id);else if(state.project){const r=e.currentTarget.getBoundingClientRect();video.currentTime=clamp((e.clientX-r.left)/r.width*state.project.duration,0,state.project.duration);}});
+$('editScope').onchange=e=>setScope(e.target.value);$('panelEditScope').onchange=e=>setScope(e.target.value);
+$('sentenceSelect').onchange=e=>{selectCaption(e.target.value);renderCaptionList();renderTimeline();};
+$('captionList').addEventListener('click',e=>{const b=e.target.closest('[data-word]');if(!b||state.scope!=='word')return;state.wordIndex=Number(b.dataset.word);const c=selectedCaption(),w=captionWords(c)[state.wordIndex];if(w)seekTo(w.start+.001,false);renderWordEditor();renderTimeline();syncStyleControls();});
+$('captionList').addEventListener('input',e=>{
+  if(e.target.id!=='wordText')return;const c=selectedCaption(),text=e.target.value.trim();if(!text||/\s/.test(text))return;
+  const key=`word:${c.id}:${state.wordIndex}`;
+  if(state.editing!==key){pushUndo();state.editing=key;}
+  editWord(c,state.wordIndex,{text});
+  $('captionList').querySelector('.word-context').textContent=c.text;
+  const chip=$('captionList').querySelector(`[data-word="${state.wordIndex}"]`);if(chip)chip.textContent=text;
+  renderTimeline();markDirty();
+});
+$('captionList').addEventListener('focusin',e=>{if(e.target.id==='wordText')state.editing=null;});
+$('captionList').addEventListener('click',e=>{
+  if(!e.target.closest('#applyWord'))return;const c=selectedCaption();
+  const patch={text:$('wordText').value,start:parseTime($('wordStart').value),end:parseTime($('wordEnd').value)};
+  try{editWord(clone(c),state.wordIndex,patch);const before=captionWords(c)[state.wordIndex];if(before.text===patch.text.trim()&&before.start===patch.start&&before.end===patch.end){renderWordEditor();return;}commit(()=>editWord(c,state.wordIndex,patch));}catch(error){toast(error.message,true);}
+});
+const timeline=$('captionTimeline');let timelinePointer=null;
+function scrub(e){const r=timeline.getBoundingClientRect();seekTo(timelineTime(e.clientX,r.left,r.width,state.project.duration));}
+timeline.addEventListener('pointerdown',e=>{if(!state.project||state.exporting||e.button!==0)return;e.preventDefault();video.pause();timelinePointer=e.pointerId;state.scrubbing=true;timeline.setPointerCapture(e.pointerId);timeline.focus();scrub(e);});
+timeline.addEventListener('pointermove',e=>{if(e.pointerId===timelinePointer)scrub(e);});
+function endScrub(e){if(e.pointerId!==timelinePointer)return;timelinePointer=null;state.scrubbing=false;if(timeline.hasPointerCapture(e.pointerId))timeline.releasePointerCapture(e.pointerId);updatePlayer();}
+timeline.addEventListener('pointerup',endScrub);timeline.addEventListener('pointercancel',endScrub);timeline.addEventListener('lostpointercapture',()=>{timelinePointer=null;state.scrubbing=false;});
+timeline.addEventListener('keydown',e=>{if(!state.project)return;const step=e.shiftKey?1:.1;const values={ArrowLeft:video.currentTime-step,ArrowRight:video.currentTime+step,Home:0,End:state.project.duration};if(e.key in values){e.preventDefault();seekTo(values[e.key]);}});
 const styleBindings={fontFamily:['font',String],fontSize:['size',Number],textColor:['color',String],highlightColor:['highlight',String],outline:['outline',Number],backgroundOpacity:['background',Number],position:['position',String],animation:['animation',String]};
 for(const [id,[key,convert]] of Object.entries(styleBindings)){
   $(id).addEventListener('input',e=>changeStyle({[key]:convert(e.target.value),preset:'custom'}));
 }
-$('shadow').onchange=e=>changeStyle({shadow:e.target.checked,preset:'custom'});$('applyAll').onchange=syncStyleControls;
-$('applyStyleAll').onclick=()=>{if(!state.project)return;const style=effectiveStyle();commit(()=>{state.project.style=clone(style);state.project.captions.forEach(c=>delete c.style);});$('applyAll').checked=true;syncStyleControls();toast('Selected style applied to all captions.');};
-$('playButton').onclick=togglePlay;$('stagePlay').onclick=togglePlay;canvas.onclick=togglePlay;$('videoSeek').oninput=e=>{video.currentTime=Number(e.target.value);};$('muteButton').onclick=()=>{video.muted=!video.muted;$('muteButton').style.opacity=video.muted?.4:1;$('muteButton').setAttribute('aria-label',video.muted?'Unmute audio':'Mute audio');};
+$('shadow').onchange=e=>changeStyle({shadow:e.target.checked,preset:'custom'});
+$('applyStyleAll').onclick=()=>{if(!state.project)return;const style=effectiveStyle();commit(()=>{state.project.style=clone(style);for(const c of state.project.captions){delete c.style;for(const w of c.words||[])delete w.style;}});setScope('all');toast('Selected style applied to all captions.');};
+$('playButton').onclick=togglePlay;$('stagePlay').onclick=togglePlay;canvas.onclick=togglePlay;$('videoSeek').oninput=e=>seekTo(Number(e.target.value));$('muteButton').onclick=()=>{video.muted=!video.muted;$('muteButton').style.opacity=video.muted?.4:1;$('muteButton').setAttribute('aria-label',video.muted?'Unmute audio':'Mute audio');};
 $('fullscreenButton').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('videoStage').requestFullscreen();}catch{toast('This browser does not support full screen.');}};
 $('safeAreaButton').onclick=()=>{$('safeAreaGuide').hidden=!$('safeAreaGuide').hidden;$('safeAreaButton').setAttribute('aria-pressed',!$('safeAreaGuide').hidden);updateSafeArea();};
 new ResizeObserver(updateSafeArea).observe($('videoStage'));document.addEventListener('fullscreenchange',()=>requestAnimationFrame(updateSafeArea));
-video.addEventListener('play',updatePlayer);video.addEventListener('pause',updatePlayer);video.addEventListener('seeked',updatePlayer);
+video.addEventListener('play',updatePlayer);video.addEventListener('pause',updatePlayer);video.addEventListener('seeked',()=>{paintPreview();updatePlayer();});video.addEventListener('ended',updatePlayer);
 $('projectsList').addEventListener('click',async e=>{
   const open=e.target.closest('[data-open-project]');if(open)return openProject(open.dataset.openProject);
   const del=e.target.closest('[data-delete-project]');if(del){const id=del.dataset.deleteProject;try{await storage.deleteProject(id);if(state.project?.id===id){state.project=null;state.file=null;try{localStorage.removeItem('lafal-last-project');}catch{}}await showProjects();toast('Project deleted from this device.');}catch{toast('Could not delete this project.',true);}}
@@ -474,7 +566,7 @@ $('exportDialog').addEventListener('cancel',e=>{if(state.exporting){e.preventDef
 document.addEventListener('keydown',e=>{
   if(e.target.matches('input,textarea,select,[contenteditable=true]')||document.querySelector('dialog[open]'))return;
   if(state.view==='editor'){
-    if(e.code==='Space'){e.preventDefault();togglePlay();}
+    if(e.code==='Space'&&!e.target.closest('button,a')){e.preventDefault();if(!e.repeat)togglePlay();}
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo(e.shiftKey);}
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();undo(true);}
   }
@@ -485,7 +577,6 @@ window.addEventListener('pagehide',()=>saveNow());
 async function init(){
   try{setTheme(localStorage.getItem('lafal-theme')||'dark');const lang=localStorage.getItem('lafal-language');if(lang&&langLabels[lang])$('uploadLanguage').value=lang;}catch{}
   renderPresets();updateProjectCount();frameLoop();
-  try{const id=localStorage.getItem('lafal-last-project');if(id){const p=await storage.getProject(id);if(p?.captions.length)await openProject(id);}}
-  catch{}
+  setView('upload');
 }
 init();

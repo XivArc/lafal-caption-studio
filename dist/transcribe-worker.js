@@ -1,13 +1,26 @@
+import {distributeWords} from './core.js';
 import {pipeline,env} from './vendor/transformers.min.js';
 env.allowLocalModels=false;
 env.backends.onnx.wasm.numThreads=1;
 env.backends.onnx.wasm.wasmPaths=new URL('./vendor/ort/',import.meta.url).href;
 env.backends.onnx.wasm.proxy=false;
-let transcriber;
+let transcriber;let phase='model';
+const nativeFetch=globalThis.fetch.bind(globalThis);
+globalThis.fetch=async(resource,options={})=>{
+  const url=String(resource?.url||resource);
+  const response=await nativeFetch(resource,options);
+  if(!response.ok&&response.status!==404)throw new Error(`Model download HTTP ${response.status}: ${url}`);
+  if(response.ok&&response.headers.get('content-type')?.includes('text/html')&&/\.(json|onnx|wasm)(?:\?|$)/.test(url))throw new Error(`Model download returned a web page instead of a model: ${url}`);
+  return response;
+};
 const downloads=new Map();
 self.onmessage=async ({data})=>{
   if(data.type!=='transcribe')return;
   try{
+    phase='model';
+    env.useBrowserCache=!data.freshModel&&typeof caches!=='undefined';
+    env.backends.onnx.wasm.simd=!data.compatibility;
+    if(typeof WebAssembly==='undefined')throw new Error('WebAssembly is unavailable in this browser.');
     if(!transcriber){
       self.postMessage({type:'status',message:'Downloading the Whisper model · first use only'});
       transcriber=await pipeline('automatic-speech-recognition','Xenova/whisper-tiny',{
@@ -20,6 +33,7 @@ self.onmessage=async ({data})=>{
         }
       });
     }
+    phase='transcription';let estimatedWordTiming=false;
     const audio=data.audio,sampleRate=16000,seconds=audio.length/sampleRate,block=25,padding=1.5;
     const words=[];let fullText='';
     for(let coreStart=0;coreStart<seconds;coreStart+=block){
@@ -31,7 +45,12 @@ self.onmessage=async ({data})=>{
         self.postMessage({type:'status',message:`Recognising speech · ${Math.floor(coreStart)}–${Math.ceil(coreEnd)} seconds`});
         const options={return_timestamps:'word',task:'transcribe',chunk_length_s:30,stride_length_s:3,temperature:0};
         if(data.language&&data.language!=='auto')options.language=data.language;
-        const result=await transcriber(sample,options);
+        let result;
+        try{result=await transcriber(sample,options);}catch(error){
+          if(!/alignment_heads|token-level timestamps/i.test(error.message))throw error;
+          self.postMessage({type:'status',message:'Using caption timing to estimate word timing…'});
+          result=await transcriber(sample,{...options,return_timestamps:true});estimatedWordTiming=true;
+        }
         const chunks=result.chunks||[];
         for(let i=0;i<chunks.length;i++){
           const c=chunks[i],text=c.text?.trim();if(!text)continue;
@@ -39,7 +58,7 @@ self.onmessage=async ({data})=>{
           if(!Number.isFinite(a))a=i?Number(chunks[i-1].timestamp?.[1])||i*.25:0;
           if(!Number.isFinite(b)||b<=a)b=Number(chunks[i+1]?.timestamp?.[0])||a+.25;
           const start=Math.max(0,sliceStart+a),end=Math.min(seconds,sliceStart+b),mid=(start+end)/2;
-          if(mid>=coreStart&&mid<coreEnd&&end>start)words.push({text,start,end});
+          if(mid>=coreStart&&mid<coreEnd&&end>start){if(/\s/.test(text))words.push(...distributeWords(text,start,end));else words.push({text,start,end});}
         }
         if(!chunks.length&&result.text?.trim()){
           const textWords=result.text.trim().split(/\s+/),step=(coreEnd-coreStart)/textWords.length;
@@ -49,6 +68,6 @@ self.onmessage=async ({data})=>{
       }
       self.postMessage({type:'progress',progress:coreEnd/seconds});
     }
-    self.postMessage({type:'done',words,text:fullText,language:data.language||'auto'});
-  }catch(error){self.postMessage({type:'error',message:error.message||String(error)});transcriber=null;}
+    self.postMessage({type:'done',words,text:fullText,language:data.language||'auto',estimatedWordTiming});
+  }catch(error){self.postMessage({type:'error',message:`${error.name||'Error'}: ${error.message||String(error)}`,phase});transcriber=null;}
 };

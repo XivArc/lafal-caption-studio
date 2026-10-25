@@ -1,6 +1,6 @@
 {
   "name": "lafal-studio",
-  "version": "1.0.0",
+  "version": "2.2.0",
   "description": "Automatic browser-local captions, ready for GitHub Pages.",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "preview": "node scripts/serve.mjs",
-    "check": "node --check dist/app.js && node --check dist/core.js && node --check dist/media.js && node --check dist/storage.js && node --check dist/transcribe-worker.js && node --check scripts/serve.mjs",
-    "test": "node --test tests/core.test.js"
+    "check": "node --check dist/app.js && node --check dist/core.js && node --check dist/media.js && node --check dist/storage.js && node --check dist/transcribe-worker.js && node --check scripts/serve.mjs && node --check dist/editor.js && node --check dist/diagnostics.js",
+    "test": "node --test tests/*.test.js"
   }
 }
