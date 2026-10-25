@@ -12,7 +12,7 @@ async function transaction(store,mode,fn){
   return new Promise((resolve,reject)=>{
     const tx=database.transaction(store,mode),s=tx.objectStore(store);let result;
     const req=fn(s);req.onsuccess=()=>{result=req.result;};
-    tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Penyimpanan dibatalkan'));
+    tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Storage operation cancelled'));
   });
 }
 export const saveProject=project=>transaction('projects','readwrite',s=>s.put(project));

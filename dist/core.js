@@ -1,11 +1,11 @@
-export const DEFAULT_STYLE = Object.freeze({preset:'classic',font:'sans',size:4.5,color:'#ffffff',highlight:'#d4f575',outline:8,shadow:true,background:0,position:'bottom',animation:'none',weight:700,uppercase:false});
+export const DEFAULT_STYLE = Object.freeze({preset:'classic',font:'sans',size:4.5,color:'#ffffff',highlight:'#6de2dc',outline:8,shadow:true,background:0,position:'bottom',animation:'none',weight:700,uppercase:false});
 export const PRESETS = {
   classic:{...DEFAULT_STYLE,preset:'classic'},
   minimal:{...DEFAULT_STYLE,preset:'minimal',size:4.2,weight:500,outline:0,shadow:false,background:65},
   bold:{...DEFAULT_STYLE,preset:'bold',size:5,weight:800,outline:12,animation:'pop',uppercase:true},
   highlight:{...DEFAULT_STYLE,preset:'highlight',weight:800,outline:7,animation:'highlight'}
 };
-export const PRESET_LABELS = {classic:'Klasik',minimal:'Minimalis',bold:'Bold ala TikTok',highlight:'Highlight per kata'};
+export const PRESET_LABELS = {classic:'Classic',minimal:'Minimal',bold:'TikTok Bold',highlight:'Word highlight'};
 export const uid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
 export const cleanText=t=>String(t??'').replace(/\s+/g,' ').trim();
@@ -78,10 +78,10 @@ export function captionMetrics(c,width,height){
   const cps=cleanText(c.text).length/Math.max(.05,duration);
   const lines=splitLines(c.text,limit);
   const warnings=[];
-  if(lines.some(x=>x.length>limit))warnings.push('Teks terlalu panjang');
-  if(duration<.98)warnings.push('Kurang dari 1 detik');
-  if(duration>7.01)warnings.push('Lebih dari 7 detik');
-  if(cps>20.5)warnings.push('Terlalu cepat dibaca');
+  if(lines.some(x=>x.length>limit))warnings.push('Text is too long');
+  if(duration<.98)warnings.push('Less than 1 second');
+  if(duration>7.01)warnings.push('More than 7 seconds');
+  if(cps>20.5)warnings.push('Too fast to read');
   return {cps,duration,lines,warnings};
 }
 export function exportSubtitles(captions,format,{width=1920,height=1080}={}){
@@ -119,7 +119,7 @@ export function drawCaption(ctx,width,height,caption,time,baseStyle=DEFAULT_STYL
   const text=style.uppercase?cleanText(caption.text).toLocaleUpperCase():cleanText(caption.text);
   const lines=splitLines(text,lineLimit(width,height));
   let size=height*style.size/100;
-  const family=style.font==='serif'?'Georgia,serif':'Manrope,Arial,sans-serif';
+  const family=style.font==='serif'?'Georgia,serif':'Inter,Arial,sans-serif';
   ctx.save();
   ctx.font=`${style.weight} ${size}px ${family}`;
   const widest=Math.max(1,...lines.map(l=>ctx.measureText(l).width));
@@ -137,7 +137,7 @@ export function drawCaption(ctx,width,height,caption,time,baseStyle=DEFAULT_STYL
   }
   ctx.textAlign='left';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.miterLimit=2;
   const maxLine=Math.max(...lines.map(l=>ctx.measureText(l).width));
-  if(style.background>0){ctx.fillStyle=`rgba(10,16,12,${style.background/100})`;roundedRect(ctx,width/2-maxLine/2-size*.35,y-size*.12,maxLine+size*.7,totalHeight+size*.24,size*.2);}
+  if(style.background>0){ctx.fillStyle=`rgba(4,14,21,${style.background/100})`;roundedRect(ctx,width/2-maxLine/2-size*.35,y-size*.12,maxLine+size*.7,totalHeight+size*.24,size*.2);}
   const words=(caption.words?.length?caption.words:distributeWords(caption.text,caption.start,caption.end));
   let active=-1;for(let i=0;i<words.length;i++){if(time>=words[i].start)active=i;else break;}
   let globalIndex=0;
@@ -150,8 +150,8 @@ export function drawCaption(ctx,width,height,caption,time,baseStyle=DEFAULT_STYL
       const highlight=style.animation==='highlight'&&globalIndex===active;
       if(highlight){ctx.fillStyle=style.highlight;roundedRect(ctx,x-size*.08,baseY-size*.57,wordWidth+size*.16,size*1.14,size*.12);}
       if(style.shadow){ctx.shadowColor='rgba(0,0,0,.65)';ctx.shadowBlur=size*.14;ctx.shadowOffsetY=size*.06;}
-      if(style.outline>0&&!highlight){ctx.strokeStyle='#111811';ctx.lineWidth=size*style.outline/100*2;ctx.strokeText(word,x,baseY);}
-      ctx.fillStyle=highlight?'#192412':style.color;
+      if(style.outline>0&&!highlight){ctx.strokeStyle='#041018';ctx.lineWidth=size*style.outline/100*2;ctx.strokeText(word,x,baseY);}
+      ctx.fillStyle=highlight?'#06141e':style.color;
       if(highlight){ctx.shadowBlur=0;ctx.shadowOffsetY=0;}
       ctx.fillText(word,x,baseY);
       ctx.shadowBlur=0;ctx.shadowOffsetY=0;
@@ -161,7 +161,7 @@ export function drawCaption(ctx,width,height,caption,time,baseStyle=DEFAULT_STYL
   ctx.restore();
 }
 export function drawFrame(ctx,width,height,video,captions,time,style){
-  ctx.fillStyle='#111712';ctx.fillRect(0,0,width,height);
+  ctx.fillStyle='#040e15';ctx.fillRect(0,0,width,height);
   if(video.readyState>=2)ctx.drawImage(video,0,0,width,height);
   drawCaption(ctx,width,height,activeCaption(captions,time),time,style);
 }

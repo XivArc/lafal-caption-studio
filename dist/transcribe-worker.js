@@ -9,7 +9,7 @@ self.onmessage=async ({data})=>{
   if(data.type!=='transcribe')return;
   try{
     if(!transcriber){
-      self.postMessage({type:'status',message:'Mengunduh model Whisper · pemakaian pertama saja'});
+      self.postMessage({type:'status',message:'Downloading the Whisper model · first use only'});
       transcriber=await pipeline('automatic-speech-recognition','Xenova/whisper-tiny',{
         quantized:true,progress_callback:p=>{
           if(p.status==='progress'){
@@ -28,7 +28,7 @@ self.onmessage=async ({data})=>{
       let energy=0;for(let i=0;i<sample.length;i+=4)energy+=sample[i]*sample[i];
       const rms=Math.sqrt(energy/Math.max(1,sample.length/4));
       if(rms>.001){
-        self.postMessage({type:'status',message:`Mengenali ucapan · ${Math.floor(coreStart)}–${Math.ceil(coreEnd)} detik`});
+        self.postMessage({type:'status',message:`Recognising speech · ${Math.floor(coreStart)}–${Math.ceil(coreEnd)} seconds`});
         const options={return_timestamps:'word',task:'transcribe',chunk_length_s:30,stride_length_s:3,temperature:0};
         if(data.language&&data.language!=='auto')options.language=data.language;
         const result=await transcriber(sample,options);
